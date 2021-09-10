@@ -5,13 +5,17 @@ import (
 	"crypto/tls"
 	"fmt"
 	"github.com/mizuki1412/go-core-kit/class/exception"
+	"github.com/mizuki1412/go-core-kit/library/filekit"
 	"github.com/mizuki1412/go-core-kit/library/jsonkit"
 	"github.com/tidwall/gjson"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/cookiejar"
+	"net/textproto"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -91,6 +95,58 @@ func Request(reqBean Req) (string, int) {
 		panic(exception.New(err.Error()))
 	}
 	return string(body), resp.StatusCode
+}
+
+// UploadFile 第二个参数指的是form的key
+func UploadFile(url, filedName, filePath string) (string, int) {
+	buf := new(bytes.Buffer)
+	w := multipart.NewWriter(buf)
+	defer w.Close()
+	bin := filekit.ReadBytes(filePath)
+	fw, err := createFormFile(filedName, filepath.Base(filePath), http.DetectContentType(bin), w)
+	if err != nil {
+		panic(exception.New(err.Error()))
+	}
+	_, err = fw.Write(bin)
+	if err != nil {
+		panic(exception.New(err.Error()))
+	}
+	//html中回车是\r\n
+	_, err = fw.Write([]byte("\r\n--" + w.Boundary() + "--"))
+	if err != nil {
+		panic(exception.New(err.Error()))
+	}
+	req, err := http.NewRequest(http.MethodPost, url, buf)
+	if err != nil {
+		panic(exception.New(err.Error()))
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	resp, err := client.Do(req)
+	if err != nil {
+		panic(exception.New(err.Error()))
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		panic(exception.New(err.Error()))
+	}
+	return string(body), resp.StatusCode
+}
+
+// createFormFile 重写CreteFormFile方法 https://my.oschina.net/bianweiall/blog/544355
+func createFormFile(fieldname, filename, contentType string, w *multipart.Writer) (io.Writer, error) {
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition",
+		fmt.Sprintf(`form-data; name="%s"; filename="%s"`,
+			escapeQuotes(fieldname), escapeQuotes(filename)))
+	h.Set("Content-Type", contentType)
+	return w.CreatePart(h)
+}
+
+var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
+
+func escapeQuotes(s string) string {
+	return quoteEscaper.Replace(s)
 }
 
 func DownloadToFile(url string, filePath string) {
